@@ -96,4 +96,4 @@ ENV/
 .idea/
 
 # Project-specific
-
+*.tsv
