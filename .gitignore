@@ -97,3 +97,4 @@ ENV/
 
 # Project-specific
 *.tsv
+*.ipynb
