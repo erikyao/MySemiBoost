@@ -39,7 +39,7 @@ class Ensemble:
         return len(self.scores)
 
 
-# `BaseEstimator` implemented: `set_param` method (used in GridSearch)
+# `BaseEstimator` implemented: `set_params` method (used in GridSearch)
 # `ClassifierMixin` implemented: default `score` method
 class SemiBooster(BaseEstimator, ClassifierMixin):
     def __init__(self, unlabeled_feat=pd.DataFrame(), sigma=1, S_factory=None,

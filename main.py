@@ -49,9 +49,7 @@ def test_1():
                          S_factory=S_factory,
                          T=2,
                          sample_percent=0.1,
-                         base_classifier=LogisticRegression,
-                         base_model_cfg=dict(penalty='l2', C=1.0, class_weight=None, random_state=1337,
-                                             solver='liblinear', max_iter=100, verbose=0, warm_start=False, n_jobs=1))
+                         base_classifier=lr)
         sb.fit(labeled_feat=labeled_train_X,
                labels=labeled_train_y)
 
