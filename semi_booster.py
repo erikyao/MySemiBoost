@@ -1,10 +1,11 @@
 from os import path
 import logging
+import logging.config
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, ClassifierMixin, clone
-from pseudo_label_util import p_i, q_i, alpha
-from sampling import sample
+from .pseudo_label_util import p_i, q_i, alpha
+from .sampling import sample_pseudo_weights
 
 
 log_file_path = path.join(path.dirname(path.abspath(__file__)), 'logging.ini')
@@ -15,17 +16,19 @@ logger.name = __name__
 
 
 class Ensemble:
-    def __init__(self, t, clf_lst, alpha_lst, index):
+    def __init__(self, t, index):
         self.t = t
-        self.clf_lst = clf_lst  # the $h$ sequence which gives $h_1(x), h_2(x), ..., h_t(x)$
-        self.alpha_lst = alpha_lst  # the \alpha sequence of $\alpha_1, \alpha_2, ..., \alpha_t$
+        self.clf_list = []   # the $h$ sequence which gives $h_1(x), h_2(x), ..., h_t(x)$
+        self.alpha_list = []  # the \alpha sequence of $\alpha_1, \alpha_2, ..., \alpha_t$
+        self.h_x_list = []
 
         self.scores = pd.Series(data=0, index=index)  # the values of $H(x)$
 
     def update(self, clf, alpha, h_x):
         self.t += 1
-        self.clf_lst.append(clf)
-        self.alpha_lst.append(alpha)
+        self.clf_list.append(clf)
+        self.alpha_list.append(alpha)
+        self.h_x_list.append(h_x)
 
         if self.scores is None:
             self.scores = alpha * h_x
@@ -71,6 +74,7 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
         # self.unlabeled_feat = unlabeled_feat
         self.all_feat = pd.concat([labeled_feat, self.unlabeled_feat])
 
+        # `np.unique` returns SORTED unique values
         self.classes_ = np.unique(labels)
 
         # Only evaluate S at the 1st time or when self.sigma changes
@@ -84,7 +88,7 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
         return self
 
     def _run(self):
-        H = Ensemble(t=0, clf_lst=[], alpha_lst=[], index=self.all_feat.index)
+        H = Ensemble(t=0, index=self.all_feat.index)
 
         for cur_round in range(1, self.T + 1):
             # `DataFrame.apply(axis=1)` cannot access each row's index
@@ -106,7 +110,7 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
             pseudo_labels = pd.Series(np.sign(p_i_series - q_i_series).astype(int), index=self.unlabeled_feat.index)
             pseudo_weights = pd.Series(abs(p_i_series - q_i_series), index=self.unlabeled_feat.index)
 
-            sampled_index = sample(pseudo_weights, self.sample_percent)
+            sampled_index = sample_pseudo_weights(pseudo_weights, self.sample_percent)
             sampled_unlabeled_data = self.unlabeled_feat.loc[sampled_index, ]
             sampled_pseudo_labels = pseudo_labels[sampled_index]
 
@@ -131,28 +135,31 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
         return self.H.scores
 
     def decision_function(self, X):
-        scores_lst = [pd.Series(clf.predict(X), index=X.index) * alpha
-                      for clf, alpha in zip(self.H.clf_lst, self.H.alpha_lst)]
-        scores = sum(scores_lst)
+        scores_list = [pd.Series(clf.predict(X), index=X.index) * alpha
+                      for clf, alpha in zip(self.H.clf_list, self.H.alpha_list)]
+        scores = sum(scores_list)
 
         return scores
 
     def predict(self, X):
         # See https://github.com/scikit-learn/scikit-learn/blob/a24c8b46/sklearn/linear_model/base.py#L311
         scores = self.decision_function(X)
-
-        indices = (scores > 0).astype(np.int)
-
-        return pd.Series(self.classes_[indices], index=X.index)
+        if len(scores.shape) == 1:
+            indices = (scores > 0).astype(np.int)
+        else:
+            indices = scores.argmax(axis=1)
+        return self.classes_[indices]
 
     def predict_proba(self, X):
-        alpha_total = sum(self.H.alpha_lst)
+        alpha_total = sum(self.H.alpha_list)
 
-        probs_lst = [pd.DataFrame(clf.predict_proba(X), index=X.index) * alpha
-                     for clf, alpha in zip(self.H.clf_lst, self.H.alpha_lst)]
-        probs = sum(probs_lst).divide(alpha_total)
+        probs_lst = [clf.predict_proba(X) * alpha
+                     for clf, alpha in zip(self.H.clf_list, self.H.alpha_list)]
+        probs_total = sum(probs_lst)
 
-        probs.columns = self.classes_
+        probs = np.divide(probs_total, alpha_total)
+
+        # probs.columns = self.classes_
 
         return probs
 
