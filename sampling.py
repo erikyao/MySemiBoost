@@ -1,4 +1,4 @@
-def sample(pseudo_weights, percent):
+def sample_pseudo_weights(pseudo_weights, percent):
     sorted_weights = pseudo_weights.sort_values(ascending=False)
     top_n = round(len(pseudo_weights) * percent)
 
