@@ -1,11 +1,10 @@
 import pandas as pd
-import numpy as np
 from sklearn.datasets import load_breast_cancer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit, cross_val_score
-from sklearn import preprocessing
-from semi_booster import SemiBooster
-from similarity_matrix import similarity_matrix_percentiles, SimilarityMatrixFactory
+from sklearn.preprocessing import MinMaxScaler
+from MySemiBoost.semi_booster import SemiBooster
+from MySemiBoost.similarity_matrix import SimilarityMatrix
 
 
 def test_1():
@@ -40,13 +39,13 @@ def test_1():
 
         print("Logistic Regression Acc: {}".format(lr_accuracy))
 
-        S_factory = SimilarityMatrixFactory(feat_dfm=pd.concat([labeled_train_X, unlabeled_train_X]),
-                                            preprocessor=preprocessing.MinMaxScaler())
-        new_sigma = similarity_matrix_percentiles(S_factory.base_matrix)[0]
+        X = MinMaxScaler().fit_transform(X=pd.concat([labeled_train_X, unlabeled_train_X]))
+        S = SimilarityMatrix(X)
+        new_sigma = S.tenth_percentiles()[0]
 
         sb = SemiBooster(unlabeled_feat=unlabeled_train_X,
                          sigma=new_sigma,
-                         S_factory=S_factory,
+                         S_factory=S,
                          T=2,
                          sample_percent=0.1,
                          base_classifier=lr)
@@ -86,14 +85,14 @@ def test_2():
     #                             cv=cv, n_jobs=1, verbose=0, fit_params=None)
     # print(lr_scores)
 
-    S_factory = SimilarityMatrixFactory(feat_dfm=pd.concat([labeled_X, unlabeled_X]),
-                                        preprocessor=preprocessing.MinMaxScaler())
-    new_sigma = similarity_matrix_percentiles(S_factory.base_matrix)[0]
+    X = MinMaxScaler().fit_transform(X=pd.concat([labeled_X, unlabeled_X]))
+    S = SimilarityMatrix(X)
+    new_sigma = S.tenth_percentiles()[0]
 
     # DO NOT set `base_classifier=lr` because cloning the fitted `lr` would lead to overheads
     sb = SemiBooster(unlabeled_feat=unlabeled_X,
                      sigma=new_sigma,
-                     S_factory=S_factory,
+                     S=S,
                      T=20,
                      sample_percent=0.1,
                      base_classifier=LogisticRegression(**lr_config))
@@ -107,7 +106,7 @@ def test_2():
 
 
 if __name__ == '__main__':
-    test_2()
+    test_1()
 
     # lst = list(test_1())
     # df = pd.DataFrame(lst)

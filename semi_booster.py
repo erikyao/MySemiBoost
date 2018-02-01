@@ -1,4 +1,5 @@
 from os import path
+import math
 import logging
 import logging.config
 import numpy as np
@@ -45,7 +46,7 @@ class Ensemble:
 # `BaseEstimator` implemented: `set_params` method (used in GridSearch)
 # `ClassifierMixin` implemented: default `score` method
 class SemiBooster(BaseEstimator, ClassifierMixin):
-    def __init__(self, unlabeled_feat=pd.DataFrame(), sigma=1, S_factory=None,
+    def __init__(self, unlabeled_feat=pd.DataFrame(), sigma=1, S=None,
                  sample_percent=0.1, T=20, base_classifier=None):
         self.labeled_feat = None
         self.labels = None
@@ -58,9 +59,10 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
 
         self.C = None
 
+        # Similarity matrix is calculated individually
+        # It's sigma may be different from our SemiBooster's sigma setting
         self.sigma = sigma
-        self.S_factory = S_factory
-        self.S = None
+        self.S = S
 
         self.sample_percent = sample_percent
         self.T = T
@@ -77,9 +79,9 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
         # `np.unique` returns SORTED unique values
         self.classes_ = np.unique(labels)
 
-        # Only evaluate S at the 1st time or when self.sigma changes
-        if (self.S is None) or (self.sigma != self.S_factory.last_sigma):
-            self.S = self.S_factory.produce(self.sigma)
+        # Reset S self.sigma changes
+        if self.S.sigma != self.sigma or not math.isclose(self.S.sigma, self.sigma, rel_tol=1e-6):
+            self.S.change_sigma(new_sigma=self.sigma)
 
         self.C = len(labeled_feat.index) / len(self.unlabeled_feat.index)
 

@@ -11,11 +11,11 @@ def p_i(i, y_l, j_u, S, H, C):
     j_l = y_l.index
     # j_u = y_u.index
 
-    S_i = S.loc[i, j_l.values]
+    S_i = S[i, j_l.values]
     I_j = y_l.map(partial(I, b=1))
     left = sum(S_i * I_j * exp(-2 * H[i]))
 
-    S_i = S.loc[i, j_u.values]
+    S_i = S[i, j_u.values]
     exp_H_diff = (H[j_u.values] - H[i]).apply(exp)
     right = 0.5 * C * sum(S_i * exp_H_diff)
 
@@ -37,11 +37,11 @@ def q_i(i, y_l, j_u, S, H, C):
     j_l = y_l.index
     # j_u = y_u.index
 
-    S_i = S.loc[i, j_l.values]
+    S_i = S[i, j_l.values]
     I_j = y_l.map(partial(I, b=-1))
     left = sum(S_i * I_j * exp(2 * H[i]))
 
-    S_i = S.loc[i, j_u.values]
+    S_i = S[i, j_u.values]
     exp_H_diff = (H[i] - H[j_u.values]).apply(exp)
     right = 0.5 * C * sum(S_i * exp_H_diff)
 
