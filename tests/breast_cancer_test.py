@@ -1,11 +1,11 @@
 import unittest
 import pandas as pd
 from pandas.util.testing import assert_series_equal
-from sklearn import preprocessing
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.datasets import load_breast_cancer
 from sklearn.linear_model import LogisticRegression
 from MySemiBoost.semi_booster import SemiBooster
-from MySemiBoost.similarity_matrix import SimilarityMatrixFactory
+from MySemiBoost.similarity_matrix import SimilarityMatrix
 
 
 class BreastCancerTestCase(unittest.TestCase):
@@ -22,14 +22,15 @@ class BreastCancerTestCase(unittest.TestCase):
         labels = labels[0:300]
         unlabeled_data = all_data.loc[300:, ]
 
-        S_factory = SimilarityMatrixFactory(feat_dfm=all_data, preprocessor=preprocessing.MinMaxScaler())
+        X = MinMaxScaler().fit_transform(X=all_data)
+        S = SimilarityMatrix(X)
 
         lr_config = dict(penalty='l2', C=1.0, class_weight=None, random_state=1337,
                          solver='liblinear', max_iter=100, verbose=0, warm_start=False, n_jobs=1)
 
         sb = SemiBooster(unlabeled_feat=unlabeled_data,
                          sigma=6.72488541e-02,
-                         S_factory=S_factory,
+                         S=S,
                          T=2,
                          sample_percent=0.1,
                          base_classifier=LogisticRegression(**lr_config))
@@ -45,8 +46,7 @@ class BreastCancerTestCase(unittest.TestCase):
         test_probs = sb.predict_proba(all_data)
         test_predits = sb.predict(all_data)
 
-        assert_series_equal(test_probs.loc[:, 1] > 0.5, test_predits == 1,
-                            check_names=False)
+        self.assertTrue(all((test_probs[:, 1] > 0.5) == (test_predits == 1)))
 
 
 if __name__ == '__main__':
