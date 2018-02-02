@@ -23,7 +23,7 @@ class BreastCancerTestCase(unittest.TestCase):
         unlabeled_data = all_data.loc[300:, ]
 
         X = MinMaxScaler().fit_transform(X=all_data)
-        S = SimilarityMatrix(X)
+        S = SimilarityMatrix.compute(X)
 
         lr_config = dict(penalty='l2', C=1.0, class_weight=None, random_state=1337,
                          solver='liblinear', max_iter=100, verbose=0, warm_start=False, n_jobs=1)

@@ -19,7 +19,7 @@ class SimilarityMatrixTestCase(unittest.TestCase):
         cls.X = pd.DataFrame(MinMaxScaler().fit_transform(all_data))
 
     def test_int_keys(self):
-        S = SimilarityMatrix(self.X[0:4], sigma=1)
+        S = SimilarityMatrix.compute(self.X[0:4], sigma=1)
         D = S.dense_matrix
 
         for i in range(0, S.N):
@@ -45,7 +45,7 @@ class SimilarityMatrixTestCase(unittest.TestCase):
         self.assertEqual(S[3, 2], D[5])
 
     def test_complex_keys(self):
-        S = SimilarityMatrix(self.X, sigma=1)
+        S = SimilarityMatrix.compute(self.X, sigma=1)
 
         values_from_slice = S[0, :]
         self.assertEqual(len(values_from_slice), S.N)
@@ -59,12 +59,16 @@ class SimilarityMatrixTestCase(unittest.TestCase):
         values_from_bool = S[0, np.full(S.N, True)]
         self.assertEqual(len(values_from_bool), S.N)
 
+        # values_from_index = S[0, pd.Series(np.arange(S.N)).index]
+        # self.assertEqual(len(values_from_bool), S.N)
+
         assert_array_equal(values_from_slice, values_from_list)
         assert_array_equal(values_from_slice, values_from_array)
         assert_array_equal(values_from_slice, values_from_bool)
+        # assert_array_equal(values_from_slice, values_from_index)
 
     def test_access_diagonal(self):
-        S = SimilarityMatrix(self.X, sigma=1)
+        S = SimilarityMatrix.compute(self.X, sigma=1)
         for i in range(0, S.N):
             self.assertEqual(S[i, i], 1)
 
@@ -72,7 +76,7 @@ class SimilarityMatrixTestCase(unittest.TestCase):
         sigma_1 = 2
         sigma_2 = 3
 
-        S1 = SimilarityMatrix(self.X, sigma=sigma_1)
+        S1 = SimilarityMatrix.compute(self.X, sigma=sigma_1)
 
         S2 = copy.deepcopy(S1)
         S2.change_sigma(new_sigma=sigma_2)
@@ -93,7 +97,7 @@ class SimilarityMatrixTestCase(unittest.TestCase):
         A changed sim-matrix (S2 above) should be identical to a newly-created one (S3 below)
         """
         sigma_3 = sigma_2
-        S3 = SimilarityMatrix(self.X, sigma=sigma_3)
+        S3 = SimilarityMatrix.compute(self.X, sigma=sigma_3)
 
         for i in self.X.index.values:
             for j in self.X.index.values:

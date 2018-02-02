@@ -1,5 +1,6 @@
 import numpy as np
 from math import exp
+from scipy.special import comb
 from scipy.spatial.distance import pdist, squareform
 from functools import partial
 
@@ -28,7 +29,14 @@ def similarity(a, b, sigma, dtype=None):
 
 
 class SimilarityMatrix:
-    def __init__(self, X, sigma=1, dtype=None):
+    def __init__(self, sigma, dtype, dense_matrix, N):
+        self.sigma = sigma
+        self.dtype = dtype
+        self.dense_matrix = dense_matrix
+        self.N = N
+
+    @classmethod
+    def compute(cls, X, sigma=1, dtype=None):
         """
         Previously, I tried to get an N*N full matrix by
 
@@ -51,11 +59,8 @@ class SimilarityMatrix:
             access in the form of `S[i, j]`:
         """
 
-        self.sigma = sigma
-        self.dtype = dtype
-
         sim_metric = partial(similarity, sigma=sigma)
-        self.dense_matrix = pdist(X, sim_metric)
+        dense_matrix = pdist(X, sim_metric)
 
         if dtype is not None:
             """
@@ -66,9 +71,64 @@ class SimilarityMatrix:
             - if you are casting to a different dtype,
               a copy is always made and returned.
             """
-            self.dense_matrix = self.dense_matrix.astype(dtype, copy=False)
+            dense_matrix = dense_matrix.astype(dtype, copy=False)
 
-        self.N = X.shape[0]
+        N = X.shape[0]
+
+        return cls(sigma, dtype, dense_matrix, N)
+
+    @classmethod
+    def load(cls, path, sigma, dtype, N):
+        dense_matrix = np.fromfile(path, dtype=dtype)
+
+        if comb(N, 2, exact=True) != len(dense_matrix):
+            raise ValueError("Got N = {}, not matching to dense matrix length {}"
+                             .format(N, len(dense_matrix)))
+
+        return cls(sigma, dtype, dense_matrix, N)
+
+
+    # def __init__(self, X, sigma=1, dtype=None):
+    #     """
+    #     Previously, I tried to get an N*N full matrix by
+    #
+    #     >>> sim_metric = partial(similarity, sigma=sigma)
+    #     >>> matrix = squareform(pdist(dfm_ppr, sim_metric))
+    #     >>> # `squareform` will expand `pdist` dense vector into a matrix.
+    #     >>> # However, the diagonal defaults to 0.
+    #     >>> np.fill_diagonal(matrix, 1)  # `fill_diagonal` is an in-place operation
+    #
+    #     The following code also work, but is slower.
+    #
+    #     >>> from sklearn.metrics.pairwise import pairwise_distances
+    #     >>> # `fill_diagonal` not required
+    #     >>> matrix = pairwise_distances(df, metric=sim_metric)
+    #
+    #     Considering the vast memory space when N goes up to >= 10000,
+    #         I'll just use the `pdist` dense matrix here.
+    #
+    #     `__get_item__` needs to be taken good care of to handle
+    #         access in the form of `S[i, j]`:
+    #     """
+    #
+    #     self.sigma = sigma
+    #     self.dtype = dtype
+    #
+    #     sim_metric = partial(similarity, sigma=sigma)
+    #     self.dense_matrix = pdist(X, sim_metric)
+    #
+    #     if dtype is not None:
+    #         """
+    #         `copy=False` means:
+    #
+    #         - if you are casting to the same dtype,
+    #           this function makes no copy and return the caller itself;
+    #         - if you are casting to a different dtype,
+    #           a copy is always made and returned.
+    #         """
+    #         self.dense_matrix = self.dense_matrix.astype(dtype, copy=False)
+    #
+    #     self.N = X.shape[0]
 
     def _convert_key_to_array(self, key):
         """
@@ -92,7 +152,7 @@ class SimilarityMatrix:
             else:
                 return key
         else:
-            raise TypeError("{} is not a integer, slice, list or np.array".foramt(key))
+            raise TypeError("{} is not a integer, slice, list or np.array".format(key))
 
     def _getitem_int(self, i, j):
         """

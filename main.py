@@ -15,6 +15,9 @@ def test_1():
     features.columns = bc['feature_names']
     labels = pd.Series(bc['target']).replace(to_replace=0, value=-1)
 
+    X = MinMaxScaler().fit_transform(X=features)
+    S = SimilarityMatrix.compute(X)
+
     train_test_splitter = StratifiedKFold(n_splits=10, random_state=1031)
     labeled_unlabeled_splitter = StratifiedShuffleSplit(n_splits=1, test_size=0.5, random_state=1031)
     for train_idx, test_idx in train_test_splitter.split(features, labels):
@@ -39,13 +42,11 @@ def test_1():
 
         print("Logistic Regression Acc: {}".format(lr_accuracy))
 
-        X = MinMaxScaler().fit_transform(X=pd.concat([labeled_train_X, unlabeled_train_X]))
-        S = SimilarityMatrix(X)
-        new_sigma = S.tenth_percentiles()[0]
+        # new_sigma = S.tenth_percentiles()[0]
 
         sb = SemiBooster(unlabeled_feat=unlabeled_train_X,
-                         sigma=new_sigma,
-                         S_factory=S,
+                         sigma=S.sigma,
+                         S=S,
                          T=2,
                          sample_percent=0.1,
                          base_classifier=lr)
@@ -58,8 +59,6 @@ def test_1():
         print("SemiBoost Acc: {}".format(sb_accuracy))
 
         print("Size of test_y: {}; Same pred: {}".format(len(test_y), sum(sb_pred_test_y == lr_pred_test_y)))
-
-        yield lr_accuracy, sb_accuracy
 
 
 def test_2():
@@ -86,21 +85,21 @@ def test_2():
     # print(lr_scores)
 
     X = MinMaxScaler().fit_transform(X=pd.concat([labeled_X, unlabeled_X]))
-    S = SimilarityMatrix(X)
-    new_sigma = S.tenth_percentiles()[0]
+    S = SimilarityMatrix.compute(X)
+    # new_sigma = S.tenth_percentiles()[0]
 
     # DO NOT set `base_classifier=lr` because cloning the fitted `lr` would lead to overheads
     sb = SemiBooster(unlabeled_feat=unlabeled_X,
-                     sigma=new_sigma,
+                     sigma=S.sigma,
                      S=S,
                      T=20,
                      sample_percent=0.1,
                      base_classifier=LogisticRegression(**lr_config))
 
-    # sb_scores = cross_val_score(estimator=sb, X=labeled_X, y=labeled_y,
-    #                             cv=cv, n_jobs=1, verbose=0)
-    #
-    # print(sb_scores)
+    sb_scores = cross_val_score(estimator=sb, X=labeled_X, y=labeled_y,
+                                cv=cv, n_jobs=1, verbose=0)
+
+    print(sb_scores)
 
     pass
 
