@@ -44,14 +44,14 @@ def test_1():
 
         # new_sigma = S.tenth_percentiles()[0]
 
-        sb = SemiBooster(unlabeled_feat=unlabeled_train_X,
-                         sigma=S.sigma,
-                         S=S,
+        sb = SemiBooster(sigma=S.sigma,
                          T=2,
                          sample_percent=0.1,
                          base_classifier=lr)
-        sb.fit(labeled_feat=labeled_train_X,
-               labels=labeled_train_y)
+        sb.fit(X=labeled_train_X,
+               y=labeled_train_y,
+               Z=unlabeled_train_X,
+               S=S)
 
         sb_pred_test_y = sb.predict(test_X)
 
@@ -69,7 +69,7 @@ def test_2():
     labels = pd.Series(bc['target']).replace(to_replace=0, value=-1)
 
     unlabeled_X = features.iloc[0:200, ]
-    # unlabeled_y = labels[0:200]
+    # unlabeled_y = y[0:200]
 
     labeled_X = features.iloc[200:, ]
     labeled_y = labels[200:]
@@ -89,15 +89,13 @@ def test_2():
     # new_sigma = S.tenth_percentiles()[0]
 
     # DO NOT set `base_classifier=lr` because cloning the fitted `lr` would lead to overheads
-    sb = SemiBooster(unlabeled_feat=unlabeled_X,
-                     sigma=S.sigma,
-                     S=S,
+    sb = SemiBooster(sigma=S.sigma,
                      T=20,
                      sample_percent=0.1,
                      base_classifier=LogisticRegression(**lr_config))
 
     sb_scores = cross_val_score(estimator=sb, X=labeled_X, y=labeled_y,
-                                cv=cv, n_jobs=1, verbose=0)
+                                cv=cv, fit_params=dict(Z=unlabeled_X, S=S), n_jobs=1, verbose=0)
 
     print(sb_scores)
 
@@ -105,7 +103,7 @@ def test_2():
 
 
 if __name__ == '__main__':
-    test_1()
+    test_2()
 
     # lst = list(test_1())
     # df = pd.DataFrame(lst)
