@@ -1,7 +1,7 @@
 import unittest
 # from sklearn.utils.estimator_checks import check_estimator
 from sklearn.base import is_classifier
-from MySemiBoost.semi_booster import SemiBooster
+from msb.semi_booster import SemiBooster
 
 
 class TypeTest(unittest.TestCase):

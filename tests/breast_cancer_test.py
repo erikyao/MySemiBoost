@@ -4,8 +4,8 @@ from pandas.util.testing import assert_series_equal
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.datasets import load_breast_cancer
 from sklearn.linear_model import LogisticRegression
-from MySemiBoost.semi_booster import SemiBooster
-from MySemiBoost.similarity_matrix import SimilarityMatrix
+from MySemiBoost.msb.semi_booster import SemiBooster
+from MySemiBoost.msb.similarity_matrix import SimilarityMatrix
 
 
 class BreastCancerTestCase(unittest.TestCase):
@@ -18,24 +18,25 @@ class BreastCancerTestCase(unittest.TestCase):
         labels = pd.Series(bc['target']).replace(to_replace=0, value=-1)
 
         # Manually pick the first 300 entries as labeled data
-        labeled_data = all_data.loc[0:299, ]
-        labels = labels[0:300]
-        unlabeled_data = all_data.loc[300:, ]
+        X = all_data.loc[0:299, ]  # contrary to usual python slices, both the start and the stop are included in .loc!
+        y = labels.loc[0:299]
+        Z = all_data.loc[300:, ]
 
-        X = MinMaxScaler().fit_transform(X=all_data)
-        S = SimilarityMatrix.compute(X)
+        X = pd.DataFrame(MinMaxScaler().fit_transform(X=X), index=X.index, columns=X.columns)
+        S = SimilarityMatrix.compute(all_data)
 
         lr_config = dict(penalty='l2', C=1.0, class_weight=None, random_state=1337,
                          solver='liblinear', max_iter=100, verbose=0, warm_start=False, n_jobs=1)
 
-        sb = SemiBooster(unlabeled_feat=unlabeled_data,
-                         sigma=6.72488541e-02,
-                         S=S,
-                         T=2,
-                         sample_percent=0.1,
-                         base_classifier=LogisticRegression(**lr_config))
-        sb.fit(labeled_feat=labeled_data,
-               labels=labels)
+        sb = SemiBooster(sigma=0.0000001,
+                         T=20,
+                         sample_percent=0.2,
+                         base_classifier=LogisticRegression(**lr_config),
+                         random_state=1337)
+        sb.fit(X=X,
+               y=y,
+               Z=Z,
+               S=S)
 
         train_scores = sb.train_scores()
         test_scores = sb.decision_function(all_data)
@@ -45,6 +46,11 @@ class BreastCancerTestCase(unittest.TestCase):
 
         test_probs = sb.predict_proba(all_data)
         test_predits = sb.predict(all_data)
+
+        import numpy as np
+        index = np.where((test_probs[:, 1] > 0.5) != (test_predits == 1))
+        print((test_probs[:, 1] > 0.5)[index])
+        print((test_predits == 1)[index])
 
         self.assertTrue(all((test_probs[:, 1] > 0.5) == (test_predits == 1)))
 
