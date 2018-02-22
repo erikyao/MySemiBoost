@@ -1,5 +1,6 @@
 import numpy as np
 from math import log, exp
+from functools import reduce
 # import logging
 
 
@@ -9,7 +10,6 @@ def I(a, b):
     return 1 if a == b else 0
 
 
-# @profile
 def pq_i(i, y, Z, S, H, C):
     """
     Calculate p_i and q_i at the same time to save computing resource
@@ -25,13 +25,13 @@ def pq_i(i, y, Z, S, H, C):
     # logger.debug("Calculating p_i left ...")
     I_j = (y.values == 1).astype(int)
     e_H = exp(-2 * H[i])
-    p_i_left = sum(S_i * I_j * e_H)
+    p_i_left = sum(reduce(np.multiply, [S_i, I_j, e_H]))
 
     # ----- Calculate q_i left ----- #
     # logger.debug("Calculating q_i left ...")
     I_j = (y.values == -1).astype(int)
     e_H = 1 / e_H
-    q_i_left = sum(S_i * I_j * e_H)
+    q_i_left = sum(reduce(np.multiply, [S_i, I_j, e_H]))
 
     # ----- Prepare for right parts ----- #
     # logger.debug("Fetching S[i, j_u.values] ...")
@@ -51,13 +51,13 @@ def pq_i(i, y, Z, S, H, C):
     >>> assert_series_equal(s.apply(exp), np.exp(s))
     '''
     # exp_H_diff = (H[j_u.values] - H[i]).apply(exp)
-    exp_H_diff = np.exp(H[j_u.values] - H[i])
-    p_i_right = 0.5 * C * sum(S_i * exp_H_diff)
+    exp_H_diff = np.exp(np.subtract(H[j_u.values], H[i]))
+    p_i_right = 0.5 * C * sum(np.multiply(S_i, exp_H_diff))
 
     # ----- Calculate q_i right ----- #
     # logger.debug("Calculating q_i right ...")
-    exp_H_diff = 1 / exp_H_diff
-    q_i_right = 0.5 * C * sum(S_i * exp_H_diff)
+    exp_H_diff = np.reciprocal(exp_H_diff)  # 1 / exp_H_diff
+    q_i_right = 0.5 * C * sum(np.multiply(S_i, exp_H_diff))
 
     return p_i_left + p_i_right, q_i_left + q_i_right
 
