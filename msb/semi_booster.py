@@ -1,4 +1,5 @@
 import math
+from itertools import accumulate
 import logging
 import numpy as np
 from numpy.random import RandomState
@@ -19,6 +20,12 @@ class NoBaseClassifierError(Exception):
 class LabelError(Exception):
     """
     Labels must be either -1 or 1; otherwise this error should be raised.
+    """
+
+
+class ParameterTError(Exception):
+    """
+    When you specified a round number `t` greater than the number of the base classifiers learnt
     """
 
 
@@ -52,17 +59,18 @@ class Ensemble:
 # `BaseEstimator` implemented: `set_params` method (used in GridSearch)
 # `ClassifierMixin` implemented: default `score` method
 class SemiBooster(BaseEstimator, ClassifierMixin):
-    def __init__(self, sigma=1, sample_percent=0.1, T=20, base_classifier=None, random_state=None):
+    def __init__(self, sigma=1, sample_proportion=0.1, T=20, base_classifier=None, random_state=None):
         # Similarity matrix is calculated individually
         # It's sigma may be different from our SemiBooster's sigma setting
         self.sigma = sigma
 
-        self.sample_percent = sample_percent
+        self.sample_proportion = sample_proportion
         self.T = T
         self.base_classifier = base_classifier
 
         self.H = None
 
+        self.random_state = random_state
         self.rs = RandomState(random_state)
 
     def fit(self, X, y, Z, S):
@@ -94,14 +102,12 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
             S.change_sigma(new_sigma=self.sigma)
 
         labeled_ratio = X.shape[0] / (X.shape[0] + Z.shape[0])
-        if self.sample_percent <= labeled_ratio:
-            logger.warn("{:.1%} data are labeled. Got sampling size {:.1%}. Samples"
-                        ""
-                        " may be all labeled."
-                        .format(labeled_ratio, self.sample_percent))
+        if self.sample_proportion <= labeled_ratio:
+            logger.warn("{:.1%} data are labeled. Got sampling size {:.1%}. Samples may be all labeled."
+                        .format(labeled_ratio, self.sample_proportion))
         else:
             logger.info("{:.1%} data are labeled. Got sampling size {:.1%}"
-                        .format(labeled_ratio, self.sample_percent))
+                        .format(labeled_ratio, self.sample_proportion))
 
         C = X.shape[0] / Z.shape[0]
 
@@ -109,13 +115,13 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
 
         return self
 
-    def _sample(self, array, weights, percents):
-        size = round(len(array) * percents, ndigits=None)  # round to the nearest integer
+    def _sample(self, array, weights, proportion):
+        size = round(len(array) * proportion, ndigits=None)  # round to the nearest integer
         prob = weights / weights.sum()
         return self.rs.choice(array, size=size, replace=False, p=prob)
 
     def _run(self, X, y, Z, S, C):
-        logger.debug("Runing!")
+        logger.debug("Running!")
 
         XZ = pd.concat([X, Z])
         H = Ensemble(t=0, index=XZ.index)
@@ -147,7 +153,7 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
 
             logger.debug("t = %d. Sampling...", cur_round)
 
-            sampled_index = self._sample(XZ.index, pseudo_weights, self.sample_percent)
+            sampled_index = self._sample(XZ.index, pseudo_weights, self.sample_proportion)
 
             X_prime = XZ.loc[sampled_index, ]
             y_prime = pseudo_labels.loc[sampled_index]
@@ -185,31 +191,47 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
     def train_scores(self):
         return self.H.scores
 
-    def decision_function(self, X):
+    def _zip_clf_and_alpha(self, t=None):
+        if t is None:
+            # Use all the clf's and alpha's
+            return zip(self.H.clf_list, self.H.alpha_list)
+        else:
+            if t > len(self.H.clf_list):
+                raise ParameterTError("Got t = {}. Only learnt {} base classifiers.".format(t, len(self.H.clf_list)))
+            else:
+                return zip(self.H.clf_list[0:t], self.H.alpha_list[0:t])
+
+    def decision_function(self, X, t=None):
         if len(self.H.clf_list) == 0 or len(self.H.alpha_list) == 0:
             raise NoBaseClassifierError("No base classifier learnt. Cannot predict.")
 
         scores_list = [pd.Series(clf.predict(X), index=X.index) * alpha
-                       for clf, alpha in zip(self.H.clf_list, self.H.alpha_list)]
+                       for clf, alpha in self._zip_clf_and_alpha(t)]
+
         scores = sum(scores_list)
 
         return scores
 
-    def predict(self, X):
-        # See https://github.com/scikit-learn/scikit-learn/blob/a24c8b46/sklearn/linear_model/base.py#L311
-        scores = self.decision_function(X)
+    def _predict_from_scores(self, scores):
         if len(scores.shape) == 1:
             indices = (scores > 0).astype(np.int)
         else:
             indices = scores.argmax(axis=1)
         return self.classes_[indices]
 
-    def predict_proba(self, X):
+    def predict(self, X, t=None):
+        # See https://github.com/scikit-learn/scikit-learn/blob/a24c8b46/sklearn/linear_model/base.py#L311
+        scores = self.decision_function(X, t)
+        return self._predict_from_scores(scores)
+
+    def predict_proba(self, X, t=None):
         alpha_total = sum(self.H.alpha_list)
 
-        probs_lst = [clf.predict_proba(X) * alpha
-                     for clf, alpha in zip(self.H.clf_list, self.H.alpha_list)]
-        probs_total = sum(probs_lst)
+        # `predict_proba` returns an array of shape (n_samples, n_classes)
+        # Cannot wrap this array into a pd.Series
+        probs_list = [clf.predict_proba(X) * alpha
+                      for clf, alpha in self._zip_clf_and_alpha(t)]
+        probs_total = sum(probs_list)
 
         probs = np.divide(probs_total, alpha_total)
 
@@ -217,3 +239,30 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
 
         return probs
 
+    def accum_decision_function(self, X, t=None):
+        if len(self.H.clf_list) == 0 or len(self.H.alpha_list) == 0:
+            raise NoBaseClassifierError("No base classifier learnt. Cannot predict.")
+
+        scores_list = [pd.Series(clf.predict(X), index=X.index) * alpha
+                       for clf, alpha in self._zip_clf_and_alpha(t)]
+
+        return accumulate(scores_list, pd.Series.add)
+
+    def accum_predict(self, X, t=None):
+        accum_scores = self.accum_decision_function(X, t)
+
+        for scores in accum_scores:
+            yield self._predict_from_scores(scores)
+
+    def accum_predict_proba(self, X, t=None):
+        probs_list = [clf.predict_proba(X) * alpha
+                      for clf, alpha in self._zip_clf_and_alpha(t)]
+        accum_probs = accumulate(probs_list)
+        accum_alpha = accumulate(self.H.alpha_list)
+
+        for alpha_sum, probs_sum in zip(accum_alpha, accum_probs):
+            probs = np.divide(probs_sum, alpha_sum)
+
+            # probs.columns = self.classes_
+
+            yield probs
