@@ -30,7 +30,7 @@ class BreastCancerTestCase(unittest.TestCase):
 
         sb = SemiBooster(sigma=0.0000001,
                          T=20,
-                         sample_percent=0.2,
+                         sample_proportion=0.2,
                          base_classifier=LogisticRegression(**lr_config),
                          random_state=1337)
         sb.fit(X=X,
