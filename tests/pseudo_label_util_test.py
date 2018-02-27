@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 from pandas.testing import assert_series_equal
 from sklearn.externals import joblib
-from OSU18_data.prep import prepare_data
+from OSU18_data.prep import OSU18DataLoader
 from MySemiBoost.msb.pseudo_label_util import pq_i
 from MySemiBoost.msb.semi_booster import Ensemble
 
@@ -12,11 +12,17 @@ from MySemiBoost.msb.semi_booster import Ensemble
 class PseudoLabelUtilCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.X, cls.y, cls.g_X, cls.Z = prepare_data(1200, 1337)
+        odr = OSU18DataLoader(data_dir=os.path.expanduser("~/Uexclave/semiboost-data"),
+                              feat_fn="feature_matrix_osu18_2.tsv",
+                              group_fn="group_id_osu18.tsv",
+                              sim_fn="OSU18_S_mm_s1_np_float64_n39083.joblib")
+        odr.load_features()
+        odr.load_groups()
+        odr.load_similarity_matrix()
 
-        data_dir = os.path.expanduser("~/Uexclave/OSU18_MSB")
-        joblib_fn = "OSU18_S_mm_s1_np_float64_n39083.joblib"
-        cls.S = joblib.load(os.path.join(data_dir, joblib_fn), "r")
+        cls.X, cls.y, cls.g_X, cls.Z = odr.randomly_mask_groups(1200, 1337)
+
+        cls.S = odr.sim_mat
 
         cls.XZ = pd.concat([cls.X, cls.Z])
         cls.H = Ensemble(t=0, index=cls.XZ.index)
