@@ -3,7 +3,8 @@ import pandas as pd
 from pandas.util.testing import assert_series_equal
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.datasets import load_breast_cancer
-from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.dummy import DummyClassifier
 from MySemiBoost.msb.semi_booster import SemiBooster
 from MySemiBoost.msb.similarity_matrix import SimilarityMatrix
 
@@ -15,23 +16,30 @@ class BreastCancerTestCase(unittest.TestCase):
 
         all_data = pd.DataFrame(bc['data'])
         all_data.columns = bc['feature_names']
+        all_data = pd.DataFrame(MinMaxScaler().fit_transform(X=all_data),
+                                index=all_data.index, columns=all_data.columns)
+
         labels = pd.Series(bc['target']).replace(to_replace=0, value=-1)
 
         # Manually pick the first 300 entries as labeled data
-        X = all_data.loc[0:299, ]  # contrary to usual python slices, both the start and the stop are included in .loc!
-        y = labels.loc[0:299]
-        Z = all_data.loc[300:, ]
+        X = all_data.loc[0:49, ]  # contrary to usual python slices, both the start and the stop are included in .loc!
+        y = labels.loc[0:49]
+        Z = all_data.loc[50:, ]
 
-        X = pd.DataFrame(MinMaxScaler().fit_transform(X=X), index=X.index, columns=X.columns)
         S = SimilarityMatrix.compute(all_data)
 
-        lr_config = dict(penalty='l2', C=1.0, class_weight=None, random_state=1337,
-                         solver='liblinear', max_iter=100, verbose=0, warm_start=False, n_jobs=1)
+        dt_config = dict(max_features="sqrt", random_state=1337, class_weight=None)
+        dt = DecisionTreeClassifier(**dt_config)
+        dm_config = dict(strategy='prior', random_state=1337)
+        dm = DummyClassifier(**dm_config)
 
-        sb = SemiBooster(sigma=0.0000001,
-                         T=20,
-                         sample_proportion=0.2,
-                         base_classifier=LogisticRegression(**lr_config),
+        sb = SemiBooster(sigma=1,
+                         T=5,
+                         sample_proportion=0.10,
+                         C="XZ-ratio",
+                         base_classifier=dt,
+                         dummy_alpha="class-balance",
+                         dummy_classifier=dm,
                          random_state=1337)
         sb.fit(X=X,
                y=y,
@@ -41,7 +49,7 @@ class BreastCancerTestCase(unittest.TestCase):
         train_scores = sb.train_scores()
         test_scores = sb.decision_function(all_data)
 
-        # We calculated the scores on the same dataset, so they must be the same
+        # We calculated the decision_scores on the same dataset, so they must be the same
         assert_series_equal(train_scores, test_scores)
 
         test_probs = sb.predict_proba(all_data)
