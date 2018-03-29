@@ -13,6 +13,6 @@ class TypeTest(unittest.TestCase):
         # Cannot pass so far.
         # It will run `fit` with some built-in datasets;
         #   however you have no chance to set the unlabeled data compatible with those datasets
-        # check_estimator(sb)
+        # check_estimator(semi_booster)
 
         self.assertTrue(is_classifier(sb))
