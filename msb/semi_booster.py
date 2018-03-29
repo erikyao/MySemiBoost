@@ -30,24 +30,54 @@ class ParameterTError(Exception):
 
 
 class Ensemble:
-    def __init__(self, t, index):
-        self.t = t
-        self.clf_list = []   # the $h$ sequence which gives $h_1(x), h_2(x), ..., h_t(x)$
-        self.alpha_list = []  # the \alpha sequence of $\alpha_1, \alpha_2, ..., \alpha_t$
-        self.h_x_list = []
+    def __init__(self, dummy_alpha, dummy_clf):
+        self.t = 0
 
-        self.scores = pd.Series(data=0, index=index)  # the values of $H(x)$
+        if dummy_alpha == "class-balance":
+            logger.info("Got dummy_alpha = 'class-balance'; value will be fixed in `dummy_fit`")
+        elif dummy_alpha <= 0:
+            raise ValueError("Numeric dummy_alpha must be positive. Got {}".format(dummy_alpha))
+
+        if dummy_clf is None:
+            logger.warn("Not using DummyClassifier. Set dummy_alpha = 0. Ignore passed value {}".format(dummy_alpha))
+
+            self.dummy_alpha = 0  # $\alpha_0$
+            self.dummy_clf = None  # $h_0(x)$
+        else:
+            self.dummy_alpha = dummy_alpha
+            self.dummy_clf = dummy_clf
+
+        self.clf_list = []   # sequence of $h_1(x), h_2(x), ..., h_t(x)$
+        self.alpha_list = []  # sequence of $\alpha_1, \alpha_2, ..., \alpha_t$
+
+        self.scores = None  # the values of $H(x)$
 
     def update(self, clf, alpha, h_x):
         self.t += 1
         self.clf_list.append(clf)
         self.alpha_list.append(alpha)
-        self.h_x_list.append(h_x)
 
         if self.scores is None:
             self.scores = alpha * h_x
         else:
             self.scores += alpha * h_x
+
+    def dummy_fit(self, X, y):
+        if self.dummy_clf is not None:
+            self.dummy_clf.fit(X, y)
+
+            if self.dummy_alpha == "class-balance":
+                self.dummy_alpha = abs(math.log(sum(y == 1) / sum(y == -1)) / 4)
+                logger.info("Got dummy_alpha = 'class-balance'; reset it to {}".format(self.dummy_alpha))
+        else:
+            logger.info("No dummy classifier to train.")
+
+    def dummy_init_scores(self, X):
+        if self.dummy_clf is not None:
+            self.scores = pd.Series(data=self.dummy_clf.predict(X) * self.dummy_alpha, index=X.index)
+        else:
+            self.scores = pd.Series(data=0, index=X.index)
+            logger.info("No dummy classifier; set `scores` to 0")
 
     def __getitem__(self, item):
         return self.scores[item]
@@ -59,16 +89,20 @@ class Ensemble:
 # `BaseEstimator` implemented: `set_params` method (used in GridSearch)
 # `ClassifierMixin` implemented: default `score` method
 class SemiBooster(BaseEstimator, ClassifierMixin):
-    def __init__(self, sigma=1, sample_proportion=0.1, T=20, base_classifier=None, random_state=None):
+    def __init__(self, sigma=1, sample_proportion=0.1, C="XZ-ratio", T=20, base_classifier=None,
+                 dummy_alpha="class-balance", dummy_classifier=None, random_state=None):
         # Similarity matrix is calculated individually
         # It's sigma may be different from our SemiBooster's sigma setting
         self.sigma = sigma
 
         self.sample_proportion = sample_proportion
+        self.C = C
         self.T = T
         self.base_classifier = base_classifier
 
-        self.H = None
+        self.dummy_alpha = dummy_alpha
+        self.dummy_classifier = dummy_classifier
+        self.H = Ensemble(dummy_alpha, dummy_classifier)
 
         self.random_state = random_state
         self.rs = RandomState(random_state)
@@ -109,9 +143,12 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
             logger.info("{:.1%} data are labeled. Got sampling size {:.1%}"
                         .format(labeled_ratio, self.sample_proportion))
 
-        C = X.shape[0] / Z.shape[0]
+        if self.C == "XZ-ratio":
+            C = X.shape[0] / Z.shape[0]
+        else:
+            C = self.C
 
-        self.H = self._run(X, y, Z, S, C)
+        self._run(X, y, Z, S, C)
 
         return self
 
@@ -123,8 +160,10 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
     def _run(self, X, y, Z, S, C):
         logger.debug("Running!")
 
-        XZ = pd.concat([X, Z])
-        H = Ensemble(t=0, index=XZ.index)
+        XZ = pd.concat([X, Z], axis=0, ignore_index=False)
+
+        self.H.dummy_fit(X, y)
+        self.H.dummy_init_scores(XZ)
 
         for cur_round in range(1, self.T + 1):
             logger.debug("t = %d. Calculating pi and qi...", cur_round)
@@ -138,7 +177,7 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
             # p_i_series = Z.index.map(lambda i: p_i(i, y, Z.index, S, H, C))
             # q_i_series = Z.index.map(lambda i: q_i(i, y, Z.index, S, H, C))
 
-            p_q_array = np.array([pq_i(i, y, Z, S, H, C) for i in XZ.index.values])
+            p_q_array = np.array([pq_i(i, y, Z, S, self.H, C) for i in XZ.index.values])
 
             p_i_series = pd.Series(p_q_array[:, 0], index=XZ.index)
             q_i_series = pd.Series(p_q_array[:, 1], index=XZ.index)
@@ -157,11 +196,12 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
 
             X_prime = XZ.loc[sampled_index, ]
             y_prime = pseudo_labels.loc[sampled_index]
+            w_prime = pseudo_weights.loc[sampled_index]
 
             logger.debug("t = %d. Learning base clf...", cur_round)
 
             cur_clf = clone(self.base_classifier)
-            cur_clf.fit(X_prime, y_prime)
+            cur_clf.fit(X_prime, y_prime, sample_weight=w_prime)
             # `cur_clf.predict` cannot keep index
             h = pd.Series(cur_clf.predict(XZ), index=XZ.index)
 
@@ -176,37 +216,46 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
                 break
 
             if cur_alpha > 0.0:
-                H.update(cur_clf, cur_alpha, h)
+                self.H.update(cur_clf, cur_alpha, h)
                 logger.info("t = %d, alpha = %f. H updated.", cur_round, cur_alpha)
             else:
                 print(cur_alpha)
                 logger.info("t = %d, alpha = %f <= 0. Stop. Return H", cur_round, cur_alpha)
                 break
 
-        if len(H.clf_list) == 0 or len(H.alpha_list) == 0:
+        if not self.has_learnt_base_classifier():
             raise NoBaseClassifierError("No base classifier learnt. Ensemble is empty")
 
-        return H
+        return self.H
 
     def train_scores(self):
         return self.H.scores
 
-    def _zip_clf_and_alpha(self, t=None):
-        if t is None:
-            # Use all the clf's and alpha's
-            return zip(self.H.clf_list, self.H.alpha_list)
+    def _list_clf_and_alpha(self, t=None):
+        if (t is not None) and (t > len(self.H.clf_list)):
+            # Grammatically, it's OK to slice like `clf_list[0:t]` when `t` is greater than the list length,
+            # but in this case I assume it's an error
+            raise ParameterTError("Got t = {}. Only learnt {} base classifiers.".format(t, len(self.H.clf_list)))
+
+        if self.has_dummy_classifier():
+            # Slicing with `t=None` is allowed
+            # `l[0:None]` is equivalent to `l[0:]`
+            clf_list = [self.H.dummy_clf] + self.H.clf_list[0:t]
+            alpha_list = [self.H.dummy_alpha] + self.H.alpha_list[0:t]
         else:
-            if t > len(self.H.clf_list):
-                raise ParameterTError("Got t = {}. Only learnt {} base classifiers.".format(t, len(self.H.clf_list)))
-            else:
-                return zip(self.H.clf_list[0:t], self.H.alpha_list[0:t])
+            clf_list = self.H.clf_list[0:t]
+            alpha_list = self.H.alpha_list[0:t]
+
+        return clf_list, alpha_list
 
     def decision_function(self, X, t=None):
-        if len(self.H.clf_list) == 0 or len(self.H.alpha_list) == 0:
+        if not self.has_learnt_base_classifier():
             raise NoBaseClassifierError("No base classifier learnt. Cannot predict.")
 
+        clf_list, alpha_list = self._list_clf_and_alpha(t)
+
         scores_list = [pd.Series(clf.predict(X), index=X.index) * alpha
-                       for clf, alpha in self._zip_clf_and_alpha(t)]
+                       for clf, alpha in zip(clf_list, alpha_list)]
 
         scores = sum(scores_list)
 
@@ -225,12 +274,14 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
         return self._predict_from_scores(scores)
 
     def predict_proba(self, X, t=None):
-        alpha_total = sum(self.H.alpha_list)
+        clf_list, alpha_list = self._list_clf_and_alpha(t)
+
+        alpha_total = sum(alpha_list)
 
         # `predict_proba` returns an array of shape (n_samples, n_classes)
         # Cannot wrap this array into a pd.Series
         probs_list = [clf.predict_proba(X) * alpha
-                      for clf, alpha in self._zip_clf_and_alpha(t)]
+                      for clf, alpha in zip(clf_list, alpha_list)]
         probs_total = sum(probs_list)
 
         probs = np.divide(probs_total, alpha_total)
@@ -240,25 +291,42 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
         return probs
 
     def accum_decision_function(self, X, t=None):
-        if len(self.H.clf_list) == 0 or len(self.H.alpha_list) == 0:
+        if not self.has_learnt_base_classifier():
             raise NoBaseClassifierError("No base classifier learnt. Cannot predict.")
 
+        clf_list, alpha_list = self._list_clf_and_alpha(t)
+
         scores_list = [pd.Series(clf.predict(X), index=X.index) * alpha
-                       for clf, alpha in self._zip_clf_and_alpha(t)]
+                       for clf, alpha in zip(clf_list, alpha_list)]
 
-        return accumulate(scores_list, pd.Series.add)
+        acc_scores = accumulate(scores_list, pd.Series.add)
 
-    def accum_predict(self, X, t=None):
+        if self.has_dummy_classifier():
+            next(acc_scores)  # skip the dummy scores
+
+        return acc_scores
+
+    def stepwise_predict(self, X, t=None):
         accum_scores = self.accum_decision_function(X, t)
 
         for scores in accum_scores:
             yield self._predict_from_scores(scores)
 
-    def accum_predict_proba(self, X, t=None):
+    def stepwise_predict_proba(self, X, t=None):
+        if not self.has_learnt_base_classifier():
+            raise NoBaseClassifierError("No base classifier learnt. Cannot predict.")
+
+        clf_list, alpha_list = self._list_clf_and_alpha(t)
+
         probs_list = [clf.predict_proba(X) * alpha
-                      for clf, alpha in self._zip_clf_and_alpha(t)]
+                      for clf, alpha in zip(clf_list, alpha_list)]
         accum_probs = accumulate(probs_list)
-        accum_alpha = accumulate(self.H.alpha_list)
+        accum_alpha = accumulate(alpha_list)
+
+        if self.has_dummy_classifier():
+            # skip the dummies
+            next(accum_probs)
+            next(accum_alpha)
 
         for alpha_sum, probs_sum in zip(accum_alpha, accum_probs):
             probs = np.divide(probs_sum, alpha_sum)
@@ -266,3 +334,10 @@ class SemiBooster(BaseEstimator, ClassifierMixin):
             # probs.columns = self.classes_
 
             yield probs
+
+    def has_learnt_base_classifier(self):
+        assert len(self.H.clf_list) == len(self.H.alpha_list)
+        return (len(self.H.clf_list) > 0) and (len(self.H.alpha_list) > 0)
+
+    def has_dummy_classifier(self):
+        return self.H.dummy_clf is not None
