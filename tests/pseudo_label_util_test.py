@@ -1,12 +1,13 @@
 import os
 import unittest
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 from pandas.testing import assert_series_equal
-from sklearn.externals import joblib
-from OSU18_data.prep import OSU18DataLoader
+
 from MySemiBoost.msb.pseudo_label_util import pq_i
 from MySemiBoost.msb.semi_booster import Ensemble
+from OSU18_experiment.data_loader import OSU18DataLoader
 
 
 class PseudoLabelUtilCase(unittest.TestCase):
@@ -16,8 +17,8 @@ class PseudoLabelUtilCase(unittest.TestCase):
                               feat_fn="feature_matrix_osu18_2.tsv",
                               group_fn="group_id_osu18.tsv",
                               sim_fn="OSU18_S_mm_s1_np_float64_n39083.joblib")
-        odr.load_features()
-        odr.load_groups()
+        odr.load_feat_dfm()
+        odr.load_group_dfm()
         odr.load_similarity_matrix()
 
         cls.X, cls.y, cls.g_X, cls.Z = odr.randomly_mask_groups(1200, 1337)
